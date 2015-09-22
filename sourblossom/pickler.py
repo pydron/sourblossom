@@ -3,7 +3,7 @@ Created on 18.09.2015
 
 @author: stefan
 '''
-from sourblossom import blob
+from sourblossom import blob, tools
 import picklesize
 import pickle
 import threading
@@ -68,6 +68,8 @@ class FilePushProducer(object):
     an `EOFError`.
     """
     
+    block_size = 64*1024
+    
     def __init__(self, size, consumer, reactor):
         """
         :param size: Number of bytes that will be written to this file.
@@ -87,7 +89,9 @@ class FilePushProducer(object):
         self.stopped = False
         self.closed = False
         self.bytes_written = 0
-        self.consumer. registerProducer(self, True)
+        self.write_buffer = []
+        self.write_buffer_len = 0
+        self.consumer.registerProducer(self, True)
     
     def pauseProducing(self):
         if self.closed or self.stopped:
@@ -109,8 +113,19 @@ class FilePushProducer(object):
         if the consumer has told us to pause. It may also block
         because the reactor thread is busy.
         """
+        datalen = len(data)
+        
         if self.closed:
             raise ValueError("Write to closed file.")
+        
+        self.bytes_written += datalen
+        if self.bytes_written > self.size:
+            raise IOError("Write beyond end of file.")
+        
+        if self.write_buffer_len + datalen < self.block_size:
+            self.write_buffer.append(data)
+            self.write_buffer_len += datalen
+            return
         
         self.paused.wait()
         
@@ -119,13 +134,24 @@ class FilePushProducer(object):
         if self.stopped:
             raise EOFError("Consumer asks to stop write more data.")
         
-        self.bytes_written += len(data)
-        if self.bytes_written > self.size:
-            raise IOError("Write beyond end of file.")
+        buffer_data = "".join(self.write_buffer)
+        threads.blockingCallFromThread(self.reactor, 
+                                       self.consumer.write, 
+                                       buffer_data)
+
+
         
-        return threads.blockingCallFromThread(self.reactor, 
-                                              self.consumer.write, 
-                                              data)
+        if datalen < self.block_size:
+            self.write_buffer = [data]
+            self.write_buffer_len = datalen
+        else:
+            self.write_buffer = []
+            self.write_buffer_len = 0 
+            threads.blockingCallFromThread(self.reactor, 
+                                           self.consumer.write, 
+                                           data)
+        
+        
         
     def close(self):
         if self.closed:
@@ -135,7 +161,24 @@ class FilePushProducer(object):
         self.closed = True
         self.paused.set()
         
+        if self.write_buffer_len > 0:
+            buffer_data = "".join(self.write_buffer)
+            threads.blockingCallFromThread(self.reactor, 
+                                           self.consumer.write, 
+                                           buffer_data)
+            self.write_buffer = []
+            self.write_buffer_len = 0 
+        
         threads.blockingCallFromThread(self.reactor, 
                                               self.consumer.unregisterProducer)
         
         self.consumer = None
+
+
+class FileConsumer(tools.AbstractConsumer):
+    """
+    File-like object with a blocking :meth:`read` method that can be used
+    from a background thread.
+    """
+    def write(self, data):
+        tools.AbstractConsumer.write(self, data)

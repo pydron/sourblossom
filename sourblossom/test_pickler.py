@@ -16,7 +16,7 @@ class TestPickler(unittest.TestCase):
     
     @utwist.with_reactor
     @twistit.yieldefer
-    def test_str(self):
+    def test_str_small(self):
         obj = "test"
         target = pickler.PickleDumpBlob(obj)
         expected = pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
@@ -25,12 +25,32 @@ class TestPickler(unittest.TestCase):
         
     @utwist.with_reactor
     @twistit.yieldefer
-    def test_numpy(self):
+    def test_numpy_small(self):
         obj = numpy.zeros(10)
         target = pickler.PickleDumpBlob(obj)
         expected = pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
         actual = yield target.read_all()
         self.assertEqual(expected, actual)
+        
+    @utwist.with_reactor
+    @twistit.yieldefer
+    def test_large(self):
+        obj = ["test"] * 100000
+        target = pickler.PickleDumpBlob(obj)
+        expected = pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+        actual = yield target.read_all()
+        self.assertEqual(expected, actual)
+        
+        
+    @utwist.with_reactor
+    @twistit.yieldefer
+    def test_large_numpy(self):
+        obj = numpy.zeros(10*1024*1024)
+        target = pickler.PickleDumpBlob(obj)
+        expected = pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+        actual = yield target.read_all()
+        self.assertEqual(expected, actual)
+        
         
 
 class TestFilePushProducer(unittest.TestCase):
