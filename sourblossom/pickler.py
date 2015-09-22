@@ -27,7 +27,7 @@ class PickleDumpBlob(blob.Blob):
         
         self.threadpool = threadpool
         if self.threadpool is None:
-            self.threadpool = reactor.getThreadPool()
+            self.threadpool = self.reactor.getThreadPool()
             
         self.obj = obj
         self.size = picklesize.picklesize(obj, pickle.HIGHEST_PROTOCOL)
@@ -52,7 +52,6 @@ def _dump_to_file(obj, fh):
         fh.close()
     except EOFError:
         pass # consumer is no longer interested
-    
 
 class FilePushProducer(object):
     """
@@ -112,8 +111,6 @@ class FilePushProducer(object):
         """
         if self.closed:
             raise ValueError("Write to closed file.")
-        
-        self.bytes_written += len(data)
         
         self.paused.wait()
         
