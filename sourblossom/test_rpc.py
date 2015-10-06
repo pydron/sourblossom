@@ -16,8 +16,8 @@ class TestRPC(unittest.TestCase):
         
     @twistit.yieldefer
     def twisted_setup(self):
-        self.rpcA = yield rpc.RPCSystem.listen(("localhost", 4000), 4000)
-        self.rpcB = yield rpc.RPCSystem.listen(("localhost", 4001), 4001)
+        self.rpcA = yield rpc.RPCSystem.listen(("localhost", 4000))
+        self.rpcB = yield rpc.RPCSystem.listen(("localhost", 4001))
         
     @twistit.yieldefer
     def twisted_teardown(self):
@@ -157,9 +157,64 @@ class TestRPC(unittest.TestCase):
                          (src.throughput/1024.0/1024.0))
         
         self.assertEqual('.'*(8*1024*1024), actual)
+        
+    @utwist.with_reactor
+    @twistit.yieldefer  
+    def test_exception(self):
+        with rpc.context(self.rpcA):
+            stub = pickle.dumps(rpc.register(self.dummy_throw))
+        with rpc.context(self.rpcB):
+            stub = pickle.loads(stub)
+        try:
+            yield stub()
+        except:
+            pass # expected
+        else:
+            self.fail("Expected exception")
+            
+    @utwist.with_reactor
+    @twistit.yieldefer  
+    def test_retval_picklefail(self):
+        with rpc.context(self.rpcA):
+            stub = pickle.dumps(rpc.register(self.dummy_picklefail))
+        with rpc.context(self.rpcB):
+            stub = pickle.loads(stub)
+        try:
+            yield stub()
+        except:
+            pass # expected
+        else:
+            self.fail("Expected exception")
+            
+    @utwist.with_reactor
+    @twistit.yieldefer  
+    def test_param_picklefail(self):
+        with rpc.context(self.rpcA):
+            stub = pickle.dumps(rpc.register(self.dummy_devnull))
+        with rpc.context(self.rpcB):
+            stub = pickle.loads(stub)
+        try:
+            yield stub(type(None))
+        except:
+            pass # expected
+        else:
+            self.fail("Expected exception")
+            
+    @utwist.with_reactor
+    @twistit.yieldefer              
+    def test_reregister(self):
+        with rpc.context(self.rpcA):
+            stubA = pickle.dumps(rpc.register(self.dummy))
+        with rpc.context(self.rpcA):
+            stubA = pickle.loads(stubA)
+            stubB = rpc.register(stubA)
+        self.assertIs(stubA, stubB)
                       
     def dummy(self):
         return 42
+    
+    def dummy_devnull(self, arg):
+        pass
     
     def dummy_arg(self, arg):
         return arg
@@ -173,6 +228,11 @@ class TestRPC(unittest.TestCase):
     def dummy_echoblob(self, blob):
         return blob
             
+    def dummy_throw(self):
+        raise ValueError("dummy")
+    
+    def dummy_picklefail(self):
+        return type(None)
         
 class TestSerialize(unittest.TestCase):
     

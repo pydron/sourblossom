@@ -14,11 +14,15 @@ class MsgRouter(object):
         self._factory = MsgFactory(self)
         self._pool = pool.KeyedPool(self._connect, self._disconnect)
     
-    def listen(self, port):
+    def listen(self):
+        _, port = self.my_addr
         ep = endpoints.TCP4ServerEndpoint(reactor, port)
         d = ep.listen(self._factory)
         def port_open(listening_port):
             self._listening_port = listening_port
+            port = listening_port.getHost().port
+            self.my_addr = (self.my_addr[0], port)
+            return self.my_addr
         d.addCallback(port_open)
         return d
     

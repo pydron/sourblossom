@@ -9,24 +9,31 @@ from twisted.internet import defer
 import struct
 
 import logging
+import traceback
+from twisted.python import failure
 logger = logging.getLogger(__name__)
 
 HEADER = struct.Struct("<iq")
 
 _rpc_system = None
+myaddr = None
 
+def my_address():
+    return myaddr
 
 def register(function):
     return _rpc_system.register(function)
 
-def listen(my_addr, port):
-    d = RPCSystem.listen(my_addr, port)
+def listen(my_addr):
+    d = RPCSystem.listen(my_addr)
     def listening(rpcsystem):
-        global _rpc_system
+        global _rpc_system, myaddr
         _rpc_system = rpcsystem
-        return rpcsystem
+        myaddr = rpcsystem.router.my_addr
+        return myaddr
     d.addCallback(listening)
     return d
+
 
 def shutdown():
     return _rpc_system.shutdown()
@@ -48,8 +55,6 @@ class context(object):
     
 class RPCSystem(object):
     
-    
-    
     def __init__(self, router):
         self.router = router
         self.router.frame_received = self._frame_received
@@ -64,10 +69,10 @@ class RPCSystem(object):
         self._next_functionid = 0;
         
     @staticmethod
-    def listen(my_addr, port):
+    def listen(my_addr):
         r = router.MsgRouter(my_addr)
         system = RPCSystem(r)
-        d = r.listen(port)
+        d = r.listen()
         def listening(_):
             return system
         d.addCallback(listening)
@@ -81,10 +86,12 @@ class RPCSystem(object):
         return self.router.shutdown()
         
     def register(self, function):
+        if isinstance(function, Stub):
+            return function
         functionid = self._next_functionid
         self._next_functionid += 1
         self._functions[functionid] = function 
-        return Stub(self, self.router.my_addr, functionid)
+        return Stub(self, self.router.my_addr, functionid, getattr(function, "__name__", "stub"))
                 
                 
     def call(self, addr, functionid, args, kwargs, blob):
@@ -167,13 +174,46 @@ class RPCSystem(object):
             else:
                 ret_msg.result = result
                 ret_msg.blob = None
-                
+
             return self._send(call_msg.caller_addr, ret_msg)
-        d.addBoth(done)
+
+            
+        def replying_failed(failure):
+            """
+            We failed to send the reply. Lets try to send that error message
+            instead. This happens, for example, if the return value is not
+            compatible with pickle.
+            """
+            ret_msg = CallCompletedMsg()
+            ret_msg.call_id = call_msg.call_id
+            ret_msg.result = failure
+            ret_msg.blob = None
+            return self._send(call_msg.caller_addr, ret_msg)
         
-        def reply_error(fail):
+        def replying_failed_badly(failure):
+            """
+            We even failed to send the error message of the failed reply!
+            Maybe that failure instance is not compatible with pickle either.
+            So lets send a more generic error message then. At least the
+            call won't block for ever on the caller's side.
+            """
+            result = failure.Failure(ValueError("I could not give you a reply, I'm sorry, but I cannot tell you why."))
+                
+            ret_msg = CallCompletedMsg()
+            ret_msg.call_id = call_msg.call_id
+            ret_msg.result = result
+            ret_msg.blob = None
+            return self._send(call_msg.caller_addr, ret_msg)
+        
+        
+        def replying_failed_completely(fail):
             logger.error("Unable to send reply to call: %s" % fail.getTraceback())
-        d.addErrback(reply_error)
+        
+        
+        d.addBoth(done)
+        d.addErrback(replying_failed)
+        d.addErrback(replying_failed_badly)
+        d.addErrback(replying_failed_completely)
         
         
     def _result_received(self, ret_msg):
@@ -215,7 +255,12 @@ def serialize(obj):
     
     appendix_length = appendix.size() if appendix is not None else 0
     
-    meta = pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+    try:
+        meta = pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+    except pickle.PickleError:
+        raise
+    except:
+        raise pickle.PickleError("Error while pickling: %s" % traceback.format_exc())
     header = HEADER.pack(len(meta), appendix_length)
     
     if appendix is None:
@@ -327,10 +372,12 @@ class CallCompletedMsg(object):
 
 class Stub(object):
     
-    def __init__(self, system, addr, functionid):
+    def __init__(self, system, addr, functionid, nicename):
         self.system = system
         self.addr = addr
         self.functionid = functionid
+        self.nicename = nicename
+        self.__name__ = self.nicename
     
     def __call__(self, *args, **kwargs):
         blob = kwargs.pop("blob", None)
@@ -341,10 +388,13 @@ class Stub(object):
                                  blob)
     
     def __getstate__(self):
-        return (self.addr, self.functionid)
+        return (self.addr, self.functionid, self.nicename)
     
     def __setstate__(self, state):
-        self.addr, self.functionid = state
+        self.addr, self.functionid, self.nicename = state
+        self.__name__ = self.nicename
         self.system = RPCSystem.instance()
+        
 
-    
+    def __repr__(self):
+        return "%s[%s]" % (self.nicename, self.addr)

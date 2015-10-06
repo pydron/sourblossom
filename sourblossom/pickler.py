@@ -9,6 +9,7 @@ import pickle
 import threading
 from twisted.internet import defer, threads
 from twisted.internet import reactor as default_reactor
+import collections
 
 class PickleDumpBlob(blob.Blob):
     """
@@ -30,28 +31,43 @@ class PickleDumpBlob(blob.Blob):
             self.threadpool = self.reactor.getThreadPool()
             
         self.obj = obj
-        self.size = picklesize.picklesize(obj, pickle.HIGHEST_PROTOCOL)
+        self._size = picklesize.picklesize(obj, pickle.HIGHEST_PROTOCOL)
         
     def size(self):
-        return self.size
+        return self._size
     
     def write_to(self, consumer):
-        if self.size < 64*1024:
+        if self._size < 64*1024:
             data = pickle.dumps(self.obj, pickle.HIGHEST_PROTOCOL)
             consumer.write(data)
             return defer.succeed(None)
         else:
-            fh = FilePushProducer(self.size, consumer, self.reactor)
+            fh = FilePushProducer(self._size, consumer, self.reactor)
             return threads.deferToThreadPool(self.reactor,
                                              self.threadpool,
                                              _dump_to_file, self.obj, fh)
-            
+
+
+
 def _dump_to_file(obj, fh):
     try:
         pickle.dump(obj, fh, pickle.HIGHEST_PROTOCOL)
         fh.close()
     except EOFError:
         pass # consumer is no longer interested
+
+def dumps_to_blob(obj, reactor=None, threadpool=None):
+    return PickleDumpBlob(obj, reactor, threadpool)
+
+def loads_from_blob(blob, reactor=None):
+    consumer = BlockingConsumer(reactor)
+    reader = BufferedReader(consumer)
+    blob.write_to(consumer)
+    
+    def loads():
+        return pickle.load(reader)
+
+    return threads.deferToThread(loads)
 
 class FilePushProducer(object):
     """
@@ -175,10 +191,109 @@ class FilePushProducer(object):
         self.consumer = None
 
 
-class FileConsumer(tools.AbstractConsumer):
-    """
-    File-like object with a blocking :meth:`read` method that can be used
-    from a background thread.
-    """
+        
+        
+class BlockingConsumer(tools.AbstractConsumer):
+    
+    min_queue = 128*1024
+    max_queue = 10*1024*1024
+    
+    def __init__(self, reactor=None):
+        tools.AbstractConsumer.__init__(self)
+        
+        self.reactor = reactor
+        if self.reactor is None:
+            self.reactor = default_reactor
+        
+        self._queue = collections.deque()
+        self._queue_size = 0
+        self._lock = threading.Condition()
+        self._paused = False
+        
     def write(self, data):
-        tools.AbstractConsumer.write(self, data)
+        self._lock.acquire()
+        self._queue.append(data)
+        self._queue_size += len(data)
+        
+        should_be_paused = (self._queue_size >= self.max_queue and 
+                            len(self._queue) > 1)
+        
+        pausing = should_be_paused and not self._paused
+        
+        self._lock.notify()
+        self._lock.release()
+        
+        if pausing:
+            self._pause()
+            self._paused = True
+        
+    def read(self):
+        self._lock.acquire()
+        while not self._queue:
+            self._lock.wait()
+        data = self._queue.popleft()
+        self._queue_size -= len(data)
+        
+        should_be_paused = (self._queue_size >= self.max_queue and 
+                            len(self._queue) > 1)
+        
+        resuming = not should_be_paused and self._paused
+        
+        self._lock.release()
+        
+        if resuming:
+            def resume():
+                self._resume()
+                self._paused = False
+            threads.blockingCallFromThread(self.reactor, resume)
+            
+        return data
+    
+class BufferedReader(object):
+    
+    def __init__(self, src):
+        self.src = src
+        self.buffer = ""
+        self.position = 0
+    
+    def read(self, count):
+        parts = []
+        
+        remaining = count
+        
+        start = self.position
+        bfrlen = len(self.buffer)
+        
+        end = min(start + count, bfrlen)
+        parts.append(self.buffer[start:end])
+        remaining -= end-start
+        self.position = end
+    
+        while remaining > 0:
+            data = self.src.read()
+            datalen = len(data)
+            remaining -= datalen
+        
+            if remaining < 0:
+                self.buffer = data
+                self.position =  datalen + remaining
+                dataleft = data[:remaining]
+            else:
+                dataleft = data
+            parts.append(dataleft)
+        return "".join(parts)
+                
+    def readline(self):
+        p = -1
+        parts = []
+        while p < 0:
+            p = self.buffer.find("\n", self.position)
+            if p < 0:
+                parts.append(self.buffer[self.position:])
+                self.buffer = self.src.read()
+                self.position = 0
+            else:
+                p += 1
+                parts.append(self.buffer[self.position:p])
+                self.position = p
+        return "".join(parts)

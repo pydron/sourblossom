@@ -17,10 +17,10 @@ class TestRouter(unittest.TestCase):
     @twistit.yieldefer
     def test(self):
         
-        a = StringMsgRouter()
-        b = StringMsgRouter()
-        yield a.listen(4000)
-        yield b.listen(4001)
+        a = StringMsgRouter(4000)
+        b = StringMsgRouter(4001)
+        yield a.listen()
+        yield b.listen()
         
         yield a.send(("localhost", 4001), 42, blob.StringBlob("hello"))
         
@@ -35,8 +35,8 @@ class TestRouter(unittest.TestCase):
 
 class StringMsgRouter(router.MsgRouter):
     
-    def __init__(self):
-        router.MsgRouter.__init__(self, "me")
+    def __init__(self, port):
+        router.MsgRouter.__init__(self, ("me", port))
         self.queue = defer.DeferredQueue()
     
     def frame_received(self, frameid, blob):
