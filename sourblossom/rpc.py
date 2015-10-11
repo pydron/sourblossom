@@ -190,7 +190,7 @@ class RPCSystem(object):
             ret_msg.blob = None
             return self._send(call_msg.caller_addr, ret_msg)
         
-        def replying_failed_badly(failure):
+        def replying_failed_badly(fail):
             """
             We even failed to send the error message of the failed reply!
             Maybe that failure instance is not compatible with pickle either.

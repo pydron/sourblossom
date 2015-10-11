@@ -1,5 +1,8 @@
 import collections
 from twisted.internet import reactor, defer
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Splitter():
     """
@@ -97,20 +100,24 @@ class AbstractConsumer(object):
     
     class ForwardProducer(object):
         def __init__(self, consumer):
+            self.paused = False
             self.consumer = consumer
             
         def stopProducing(self):
             self.consumer._stop()
         
         def pauseProducing(self):
-            self.consumer._pause()
+            self.paused = True
+            self.consumer._update_pause()
         
         def resumeProducing(self):
-            self.consumer._resume()
+            self.paused = False
+            self.consumer._update_pause()
                 
     def __init__(self):
         self.producer = None
-        self.__paused = 0 # counting number of 'active' _pause() calls
+        self.__impl_paused = False
+        self.__paused = False
         self.forward_producer = self.ForwardProducer(self)
     
     def write(self, data):
@@ -122,7 +129,7 @@ class AbstractConsumer(object):
         if self.producer is not None:
             raise ValueError("A producer is already registered")
         self.producer = producer
-        if self.__paused > 0:
+        if self.__paused:
             self.producer.pauseProducing()
     
     def unregisterProducer(self):
@@ -130,19 +137,30 @@ class AbstractConsumer(object):
             raise ValueError("No producer is registered")
         producer = self.producer
         self.producer = None
-        if self.__paused > 0:
+        if self.__paused:
             producer.resumeProducing()
         
     def _pause(self):
-        self.__paused += 1
-        if self.producer is not None and self.__paused == 1:
-            self.producer.pauseProducing()
+        assert not self.__impl_paused
+        self.__impl_paused = True
+        self._update_pause()
         
     def _resume(self):
-        if self.__paused == 0:
-            raise ValueError("Not paused")
-        self.__paused -= 1
-        if self.producer is not None and self.__paused == 0:
+        assert self.__impl_paused
+        self.__impl_paused = False
+        self._update_pause()
+            
+    def _update_pause(self):
+        shouldbe_paused = self.__impl_paused or self.forward_producer.paused
+        is_paused = self.__paused
+        self.__paused = shouldbe_paused
+        
+        if self.producer is None:
+            return
+        
+        if shouldbe_paused and not is_paused:
+            self.producer.pauseProducing()
+        elif not shouldbe_paused and is_paused:
             self.producer.resumeProducing()
             
     def _stop(self):

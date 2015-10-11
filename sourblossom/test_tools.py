@@ -104,34 +104,34 @@ class AbstractConsumer(unittest.TestCase):
         self.target.unregisterProducer()
         self.assertFalse(self.paused)
     
-    def test_double_pause(self):
-        self.target.registerProducer(self, True)
-        self.target._pause()
-        self.target._pause()
-        self.assertTrue(self.paused)
-        
-    def test_double_pause_single_resume(self):
-        self.target.registerProducer(self, True)
-        self.target._pause()
-        self.target._pause()
-        self.target._resume()
-        self.assertTrue(self.paused)
-        
-    def test_double_pause_double_resume(self):
-        self.target.registerProducer(self, True)
-        self.target._pause()
-        self.target._pause()
-        self.target._resume()
-        self.target._resume()
-        self.assertFalse(self.paused)
-        
-    def test_double_pause_tripple_resume(self):
-        self.target.registerProducer(self, True)
-        self.target._pause()
-        self.target._pause()
-        self.target._resume()
-        self.target._resume()
-        self.assertRaises(ValueError,  self.target._resume)
+#     def test_double_pause(self):
+#         self.target.registerProducer(self, True)
+#         self.target._pause()
+#         self.target._pause()
+#         self.assertTrue(self.paused)
+#         
+#     def test_double_pause_single_resume(self):
+#         self.target.registerProducer(self, True)
+#         self.target._pause()
+#         self.target._pause()
+#         self.target._resume()
+#         self.assertTrue(self.paused)
+#         
+#     def test_double_pause_double_resume(self):
+#         self.target.registerProducer(self, True)
+#         self.target._pause()
+#         self.target._pause()
+#         self.target._resume()
+#         self.target._resume()
+#         self.assertFalse(self.paused)
+#         
+#     def test_double_pause_tripple_resume(self):
+#         self.target.registerProducer(self, True)
+#         self.target._pause()
+#         self.target._pause()
+#         self.target._resume()
+#         self.target._resume()
+#         self.assertRaises(ValueError,  self.target._resume)
         
     def test_register_twice(self):
         self.target.registerProducer(tools.DummyProducer(), True)
