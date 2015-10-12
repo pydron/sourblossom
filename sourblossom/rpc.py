@@ -94,7 +94,12 @@ class RPCSystem(object):
         return Stub(self, self.router.my_addr, functionid, getattr(function, "__name__", "stub"))
                 
                 
-    def call(self, addr, functionid, args, kwargs, blob):
+    def call(self, addr, functionid, args, kwargs):
+        
+        if addr == self.router.my_addr:
+            # local call
+            function = self._functions[functionid]
+            return function(*args, **kwargs)
         
         callid = self._next_callid
         self._next_callid += 1
@@ -105,7 +110,7 @@ class RPCSystem(object):
         msg.functionid = functionid
         msg.args = args
         msg.kwargs = kwargs
-        msg.blob = blob
+        msg.blob = kwargs.pop("blob", None)
         
         # We have an interesting corner case here.
         #
@@ -378,14 +383,13 @@ class Stub(object):
         self.functionid = functionid
         self.nicename = nicename
         self.__name__ = self.nicename
+
     
     def __call__(self, *args, **kwargs):
-        blob = kwargs.pop("blob", None)
         return self.system.call(self.addr, 
                                  self.functionid, 
                                  args, 
-                                 kwargs, 
-                                 blob)
+                                 kwargs)
     
     def __getstate__(self):
         return (self.addr, self.functionid, self.nicename)
@@ -394,7 +398,6 @@ class Stub(object):
         self.addr, self.functionid, self.nicename = state
         self.__name__ = self.nicename
         self.system = RPCSystem.instance()
-        
 
     def __repr__(self):
         return "%s[%s]" % (self.nicename, self.addr)
