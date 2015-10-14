@@ -20,5 +20,6 @@ setup(
     packages = find_packages(),
     install_requires =   ['twisted>=15.0.0', 
                           'utwist>=0.1.3',
-                          'twistit>=0.2.2'],
+                          'twistit>=0.2.2',
+                          'picklesize>=0.1.1'],
 )
