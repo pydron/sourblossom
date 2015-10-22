@@ -11,7 +11,7 @@ else:
     
 setup(
     name = 'sourblossom',
-    version = '0.1.0',
+    version = '0.1.1',
     description='Asynchronous remote procedure call library',
     long_description=long_description,
     author='Stefan C. Mueller',
