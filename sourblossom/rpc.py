@@ -5,7 +5,7 @@ Created on 16.09.2015
 '''
 import pickle
 from sourblossom import blob, tools, router
-from twisted.internet import defer
+from twisted.internet import defer, task
 import struct
 
 import logging
@@ -62,11 +62,20 @@ class RPCSystem(object):
         # Maps functionid -> function
         self._functions = {}
         
-        #: Maps callid -> deferred
+        #: Maps callid -> deferred, addr, last_heard_of
         self._pending_calls = {}
+        
+        #: set of (addr,callid) of calls we are executing
+        self._executing_calls = set()
         
         self._next_callid = 0;
         self._next_functionid = 0;
+        
+        self._loop_count = 0
+        self._loop_interval = 6
+        self._loop = task.LoopingCall(self._loop)
+        
+        self._loop.start(self._loop_interval, False)
         
     @staticmethod
     def listen(my_addr):
@@ -83,6 +92,7 @@ class RPCSystem(object):
         return _rpc_system
     
     def shutdown(self):
+        self._loop.stop()
         return self.router.shutdown()
         
     def register(self, function):
@@ -141,13 +151,16 @@ class RPCSystem(object):
             logger.error("Cancellation of RPC calls not yet supported")
             
         result_d = defer.Deferred(cancelled)
-        self._pending_calls[callid] = result_d
+        self._pending_calls[callid] = [result_d, addr, self._loop_count]
         
         send_d = self._send(addr, msg)
         
         def error(fail):
             if callid in self._pending_calls:
-                self._pending_calls.errback(fail)
+                d = self._pending_calls[callid][0]
+                del self._pending_calls[callid]
+                d.errback(fail)
+                
             else:
                 logger.error("Sending data for call failed after receiving the reply: %s" % fail.getTraceback())
         send_d.addErrback(error)
@@ -165,6 +178,8 @@ class RPCSystem(object):
             kwargs = call_msg.kwargs
             if call_msg.blob:
                 kwargs["blob"] = call_msg.blob
+            
+            self._executing_calls.add((call_msg.caller_addr, call_msg.call_id))
             
             return func(*args, **kwargs)
         d = defer.maybeDeferred(call)
@@ -214,16 +229,21 @@ class RPCSystem(object):
         def replying_failed_completely(fail):
             logger.error("Unable to send reply to call: %s" % fail.getTraceback())
         
+        def cleanup(r):
+            self._executing_calls.remove((call_msg.caller_addr, call_msg.call_id))
+            return r
         
         d.addBoth(done)
         d.addErrback(replying_failed)
         d.addErrback(replying_failed_badly)
         d.addErrback(replying_failed_completely)
+        d.addBoth(cleanup)
         
         
     def _result_received(self, ret_msg):
         callid = ret_msg.call_id
-        d = self._pending_calls.get(callid, None)
+        d = self._pending_calls.get(callid, (None,None))[0]
+        del self._pending_calls[callid]
         
         if d is None:
             logger.error("Received reply for unknown call.")
@@ -241,16 +261,61 @@ class RPCSystem(object):
         blob = serialize(obj)
         return self.router.send(addr, 0, blob)
 
-    def _frame_received(self, frameid, blob):
-        d = deserialize(blob)
-        def success(obj):
-            if isinstance(obj, CallMsg):
-                self._call_received(obj)
+    def _frame_received(self, frameid, blob_, peer_address):
+        if frameid == 0:
+            
+            d = deserialize(blob_)
+            def success(obj):
+                if isinstance(obj, CallMsg):
+                    self._call_received(obj)
+                else:
+                    self._result_received(obj)
+            def fail(failure):
+                logger.error("Error while receiving message: %s" % failure.getTraceback())
+            d.addCallbacks(success, fail)
+            
+        elif frameid == 1:
+            # ping
+            d = blob_.read_all()
+            def got_content(s):
+                peer_address, callid = pickle.loads(s)
+                if (peer_address, callid) in self._executing_calls:
+                    self.router.send(peer_address, 2, blob.StringBlob(str(callid)))
+            d.addCallback(got_content)
+            
+        elif frameid == 2:
+            # pong
+            d = blob_.read_all()
+            def got_content(s):
+                callid = int(s)
+                self._pending_calls[callid][2] = self._loop_count
+            d.addCallback(got_content)
+            
+            
+        
+    def _loop(self):
+        self._loop_count += 1
+        deadline = self._loop_count - 3
+        pending = []
+        dead = []
+        for callid, (d, addr, c) in self._pending_calls.iteritems():
+            if c <= deadline:
+                dead.append((callid, d, addr))
             else:
-                self._result_received(obj)
-        def fail(failure):
-            logger.error("Error while receiving message: %s" % failure.getTraceback())
-        d.addCallbacks(success, fail)
+                pending.append((addr,callid))
+                
+        for callid, d, addr in dead:
+            del self._pending_calls[callid]
+                
+        for callid, d, addr in dead:
+            try:
+                raise IOError("Pending call appears to be dead. No reaction from %s." % repr(addr))
+            except:
+                d.errback()
+                
+        for addr, callid in pending:
+            data = pickle.dumps((self.router.my_addr, callid), pickle.HIGHEST_PROTOCOL)
+            self.router.send(addr, 1, blob.StringBlob(data))
         
 
 def serialize(obj):

@@ -2,10 +2,14 @@
 
 from twisted.internet import protocol, endpoints, reactor, defer
 
-from . import framing, pool
+from . import framing, pool, blob
 import twistit
 from twisted.python import failure
+import pickle
+import logging
 
+logger = logging.getLogger(__name__)
+_HELLO_FRAMEID = 10
 
 class MsgRouter(object):
     
@@ -16,7 +20,7 @@ class MsgRouter(object):
     
     def listen(self):
         _, port = self.my_addr
-        ep = endpoints.TCP4ServerEndpoint(reactor, port)
+        ep = endpoints.TCP4ServerEndpoint(reactor, port, backlog=200)
         d = ep.listen(self._factory)
         def port_open(listening_port):
             self._listening_port = listening_port
@@ -39,16 +43,29 @@ class MsgRouter(object):
         finally:
             self._pool.release(conn)
     
-    def _frame_received(self, frameid, blob):
-        self.frame_received(frameid, blob)
+    def _frame_received(self, frameid, blob, peer_address):
+        self.frame_received(frameid, blob, peer_address)
+        
+    def _incomming_connection(self, peer_addr, conn):
+        self._pool.add(peer_addr, conn)
     
-    def frame_received(self, frameid, blob):
+    def frame_received(self, frameid, blob, peer_address):
         pass
     
     def _connect(self, addr):
         host, port = addr
         ep = endpoints.TCP4ClientEndpoint(reactor, host, port)
-        return ep.connect(self._factory)
+        d = ep.connect(self._factory)
+        
+        def connected(conn):
+            b = blob.StringBlob(pickle.dumps(self.my_addr, pickle.HIGHEST_PROTOCOL))
+            d = conn.send_message(_HELLO_FRAMEID, b)
+            d.addCallback(lambda _:conn)
+            return d
+        
+        d.addCallback(connected)
+        
+        return d
     
     def _disconnect(self, connection):
         connection.transport.loseConnection()
@@ -58,6 +75,7 @@ class MsgConnection(protocol.Protocol):
     
     def __init__(self):
         self.connection_lost_d = defer.Deferred()
+        self.peer_address = None
         
     def connectionMade(self):
         self.merger = framing.MergeFrames(self.transport)
@@ -92,7 +110,18 @@ class MsgFactory(protocol.Factory):
     def buildProtocol(self, addr):
         conn = MsgConnection()
         def frame_received(frameid, blob):
-            self.msgrouter._frame_received(frameid, blob)
+            if frameid == _HELLO_FRAMEID:
+                d = blob.read_all()
+                
+                def read(content):
+                    peer_address = pickle.loads(content)
+                    conn.peer_address = peer_address
+                    self.msgrouter._incomming_connection(peer_address, conn)
+                    
+                d.addCallback(read)
+            else: 
+                self.msgrouter._frame_received(frameid, blob, conn.peer_address)
+                
         conn.frame_received = frame_received
         return conn
 

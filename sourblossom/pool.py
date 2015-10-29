@@ -25,6 +25,9 @@ class Pool(object):
         self._pending_factory_calls = []
         self._inuse = []
         
+    def add(self, value):
+        self._pool.append(value)
+        
     def acquire(self):
         """
         Get an element from the pool or create a new one if the pool is
@@ -108,6 +111,13 @@ class KeyedPool(object):
             return Pool(factory, self.disposer)
         
         self._pools = KeyedDefaultdict(make_pool)
+        
+    def add(self, key, value):
+        """
+        Add additional value.
+        """
+        pool = self._pools[key]
+        pool.add(value)
         
     def acquire(self, key):
         """

@@ -39,7 +39,7 @@ class StringMsgRouter(router.MsgRouter):
         router.MsgRouter.__init__(self, ("me", port))
         self.queue = defer.DeferredQueue()
     
-    def frame_received(self, frameid, blob):
+    def frame_received(self, frameid, blob, addr):
         d = blob.read_all()
         def got_all(data):
             self.queue.put((frameid, data))
