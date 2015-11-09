@@ -32,14 +32,19 @@ class PickleDumpBlob(blob.Blob):
             
         self.obj = obj
         self._size = picklesize.picklesize(obj, pickle.HIGHEST_PROTOCOL)
+        self._data = None
         
     def size(self):
         return self._size
     
     def write_to(self, consumer):
+        if self._data is not None:
+            consumer.write(self._data)
+            return defer.succeed(None)
+        
         if self._size < 64*1024:
-            data = pickle.dumps(self.obj, pickle.HIGHEST_PROTOCOL)
-            consumer.write(data)
+            self._data = pickle.dumps(self.obj, pickle.HIGHEST_PROTOCOL)
+            consumer.write(self._data)
             return defer.succeed(None)
         else:
             fh = FilePushProducer(self._size, consumer, self.reactor)
