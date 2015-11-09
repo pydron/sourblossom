@@ -1,6 +1,7 @@
 import collections
 from twisted.internet import reactor, defer
 import logging
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -272,4 +273,29 @@ class ThrottleConsumerProducer(AbstractConsumer):
     
     def resumeProducing(self):
         self._resume()
-  
+        
+        
+_friendly_queue = collections.deque()
+        
+def friendly_delayed_call(f, *args, **kwargs):
+    """
+    Acts as `reactor.callLater(0, f, *args, **kwargs)` does, but guarantees that there is at most
+    one entry in the reactor's queue. We use this to avoid filling
+    the reactor's queue to the point where important events don't get served
+    in time.
+    """
+    def run_next():
+        f, args, kwargs = _friendly_queue.popleft()
+        more = len(_friendly_queue) > 0
+        try:
+            f(*args, **kwargs)
+        except:
+            logger.error("Unhandled error: %s"  % traceback.format_exc())
+        if more:
+            reactor.callLater(0, run_next)  # @UndefinedVariable
+        
+    if not _friendly_queue:
+        # queue is currently empty, therefore there is no pending callLater
+        reactor.callLater(0, run_next)  # @UndefinedVariable
+    _friendly_queue.append((f, args, kwargs))
+    

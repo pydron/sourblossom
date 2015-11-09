@@ -7,6 +7,7 @@ import twistit
 from twisted.python import failure
 import pickle
 import logging
+from sourblossom import tools
 
 logger = logging.getLogger(__name__)
 _HELLO_FRAMEID = 10
@@ -97,7 +98,7 @@ class MsgConnection(protocol.Protocol):
         return self.merger.write_blob(frameid, blob)
     
     def _frame_received(self, frameid, blob):
-        return self.frame_received(frameid, blob)
+        return tools.friendly_delayed_call(self.frame_received, frameid, blob)
 
     def frame_received(self, frameid, blob):
         raise NotImplementedError("abstract")

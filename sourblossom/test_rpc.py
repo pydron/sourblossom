@@ -10,6 +10,7 @@ import pickle
 import twistit
 import utwist
 import logging
+import time
 logging.basicConfig(level=logging.DEBUG)
 
 class TestRPC(unittest.TestCase):
