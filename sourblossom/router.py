@@ -93,12 +93,13 @@ class MsgConnection(protocol.Protocol):
         
     def dataReceived(self, data):
         self.splitter.write(data)
+        #tools.friendly_delayed_call(self.splitter.write, data)
         
     def send_message(self, frameid, blob):
         return self.merger.write_blob(frameid, blob)
     
     def _frame_received(self, frameid, blob):
-        return tools.friendly_delayed_call(self.frame_received, frameid, blob)
+        return self.frame_received(frameid, blob)
 
     def frame_received(self, frameid, blob):
         raise NotImplementedError("abstract")
