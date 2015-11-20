@@ -72,7 +72,7 @@ class RPCSystem(object):
         self._next_functionid = 0;
         
         self._loop_count = 0
-        self._loop_interval = 60
+        self._loop_interval = 300
         self._loop = task.LoopingCall(self._loop)
         
         self._loop.start(self._loop_interval, False)
@@ -242,11 +242,12 @@ class RPCSystem(object):
     def _result_received(self, ret_msg):
         callid = ret_msg.call_id
         d = self._pending_calls.get(callid, (None,None))[0]
-        del self._pending_calls[callid]
         
         if d is None:
             logger.error("Received reply for unknown call.")
             return
+        
+        del self._pending_calls[callid]
         
         if ret_msg.result is not None:
             value = ret_msg.result
