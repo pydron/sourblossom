@@ -180,7 +180,6 @@ class RPCSystem(object):
                 kwargs["blob"] = call_msg.blob
             
             self._executing_calls.add((call_msg.caller_addr, call_msg.call_id))
-            
             return func(*args, **kwargs)
         d = defer.maybeDeferred(call)
         
@@ -288,7 +287,8 @@ class RPCSystem(object):
             d = blob_.read_all()
             def got_content(s):
                 callid = int(s)
-                self._pending_calls[callid][2] = self._loop_count
+                if callid in self._pending_calls:
+                    self._pending_calls[callid][2] = self._loop_count
             d.addCallback(got_content)
             
             
