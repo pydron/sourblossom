@@ -102,7 +102,6 @@ class MsgConnection(protocol.Protocol):
                 logger.exception("Lost connection while sending to %r" % repr(self.peer_address))
             else:
                 logger.warn("Lost connection to %r" % repr(self.peer_address), exc_info=1)
-            logger.warn()
             self.splitter.fail(failure.Failure())
         self.connection_lost_d.callback(None)
         
@@ -117,6 +116,7 @@ class MsgConnection(protocol.Protocol):
             self._sending = False
             return result
         d.addBoth(done)
+        return d
     
     def _frame_received(self, frameid, blob):
         return self.frame_received(frameid, blob)
