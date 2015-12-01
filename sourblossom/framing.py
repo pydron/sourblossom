@@ -1,6 +1,8 @@
 from . import tools, blob
 import struct
 from twisted.internet import defer
+import logging
+logger = logging.getLogger(__name__)
 
 _header = struct.Struct("<iI")
 
@@ -38,6 +40,8 @@ class SplitFrames(tools.AbstractConsumer):
                               _header.size, 
                               _header.size)
         
+        self._active = False
+        
         self._payload = None
         self._failure = None
         self._remaining_payload = 0
@@ -57,6 +61,10 @@ class SplitFrames(tools.AbstractConsumer):
         If we are currently providing data to a blob, fail that operation.
         """
         self._failure = fail
+        
+        if self._active:
+            logger.error("Failure while receiving a frame: %r" % fail.getTraceback())
+        
         if self._payload:
             self._payload.unregisterProducer()
             self._payload.fail(self._failure)
@@ -66,6 +74,7 @@ class SplitFrames(tools.AbstractConsumer):
         self._frame_queue.put((frameid,blob))
     
     def _header_received(self, data):
+        self._active = True
         frameid, length = _header.unpack(data)
 
         if self.producer is None:
@@ -93,6 +102,7 @@ class SplitFrames(tools.AbstractConsumer):
             self._payload.done()
             self._payload.unregisterProducer()
             self._payload = None
+            self._active = False
             self._splitter.request(self._header_received, 
                                   _header.size, 
                                   _header.size)

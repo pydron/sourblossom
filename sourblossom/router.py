@@ -86,6 +86,7 @@ class MsgConnection(protocol.Protocol):
     def __init__(self):
         self.connection_lost_d = defer.Deferred()
         self.peer_address = None
+        self._sending = False
         
     def connectionMade(self):
         self.merger = framing.MergeFrames(self.transport)
@@ -97,7 +98,11 @@ class MsgConnection(protocol.Protocol):
         try:
             raise reason
         except:
-            logger.warn("Lost connection to %r" % repr(self.peer_address))
+            if self._sending:
+                logger.exception("Lost connection while sending to %r" % repr(self.peer_address))
+            else:
+                logger.warn("Lost connection to %r" % repr(self.peer_address), exc_info=1)
+            logger.warn()
             self.splitter.fail(failure.Failure())
         self.connection_lost_d.callback(None)
         
@@ -106,7 +111,12 @@ class MsgConnection(protocol.Protocol):
         #tools.friendly_delayed_call(self.splitter.write, data)
         
     def send_message(self, frameid, blob):
-        return self.merger.write_blob(frameid, blob)
+        self._sending = True
+        d = self.merger.write_blob(frameid, blob)
+        def done(result):
+            self._sending = False
+            return result
+        d.addBoth(d)
     
     def _frame_received(self, frameid, blob):
         return self.frame_received(frameid, blob)
