@@ -72,7 +72,7 @@ class RPCSystem(object):
         self._next_functionid = 0;
         
         self._loop_count = 0
-        self._loop_interval = 10
+        self._loop_interval = 180
         self._loopcall = task.LoopingCall(self._loop)
         
         self._loopcall.start(self._loop_interval, False)
@@ -336,7 +336,10 @@ class RPCSystem(object):
                 
         for addr, callid in pending:
             data = pickle.dumps((self.router.my_addr, callid), pickle.HIGHEST_PROTOCOL)
-            self.router.send(addr, 1, blob.StringBlob(data))
+            d = self.router.send(addr, 1, blob.StringBlob(data))
+            def onerr(reason):
+                logger.error("Failed to ping %r: %r" % (addr, reason.getTraceback()))
+            d.addErrback(onerr)
         
 
 def serialize(obj):
