@@ -72,7 +72,7 @@ class RPCSystem(object):
         self._next_functionid = 0;
         
         self._loop_count = 0
-        self._loop_interval = 180
+        self._loop_interval = 10
         self._loopcall = task.LoopingCall(self._loop)
         
         self._loopcall.start(self._loop_interval, False)
