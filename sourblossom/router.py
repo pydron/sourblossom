@@ -97,6 +97,7 @@ class MsgConnection(protocol.Protocol):
         try:
             raise reason
         except:
+            logger.warn("Lost connection to %r" % repr(self.peer_address))
             self.splitter.fail(failure.Failure())
         self.connection_lost_d.callback(None)
         

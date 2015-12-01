@@ -331,7 +331,7 @@ class RPCSystem(object):
                 d.errback()
                 
         for addr in repair:
-            logger.warn("Attempting to repair connection to %r." % addr)
+            logger.warn("Attempting to repair connection to %r." % repr(addr))
             self.router.repair(addr)
                 
         for addr, callid in pending:
