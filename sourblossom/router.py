@@ -116,7 +116,7 @@ class MsgConnection(protocol.Protocol):
         def done(result):
             self._sending = False
             return result
-        d.addBoth(d)
+        d.addBoth(done)
     
     def _frame_received(self, frameid, blob):
         return self.frame_received(frameid, blob)
