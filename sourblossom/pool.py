@@ -6,6 +6,9 @@ Created on 14.09.2015
 
 from twisted.internet import defer
 import collections
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Pool(object):
     """
@@ -24,6 +27,7 @@ class Pool(object):
         self._pool = []
         self._pending_factory_calls = []
         self._inuse = []
+        self._forced_disposed = []
         
     def add(self, value):
         self._pool.append(value)
@@ -62,7 +66,8 @@ class Pool(object):
         Returns None.
         """
         self._inuse.remove(v)
-        self._pool.append(v)
+        if v not in self._forced_disposed:
+            self._pool.append(v)
         
     def dispose(self, v):
         """
@@ -73,18 +78,30 @@ class Pool(object):
         self._inuse.remove(v)
         return self.disposer(v)
         
-    def dispose_all(self):
+    def dispose_all(self, force=False):
         """
         Disposes all elements in the pool. Will fail if there
         are elements not yet returned.
         """
         if (self._inuse):
-            raise ValueError("Not all elements have been released.")
+            try:
+                raise ValueError("Not all elements have been released.")
+            except:
+                if force:
+                    logger.exception("Not all elements have been released.")
+                else:
+                    raise
+                
         for d in self._pending_factory_calls:
             d.cancel()
         self._pending_factory_calls = []
         
-        ds = [self.disposer(v) for v in self._pool]
+        self._forced_disposed += list(self._inuse)
+        allvalues = self._pool + self._inuse
+        
+        self._pool = []
+        
+        ds = [self.disposer(v) for v in allvalues]
         return defer.DeferredList(ds, fireOnOneErrback=True)
             
     
@@ -146,6 +163,15 @@ class KeyedPool(object):
         key = self._value_to_key.pop(v)
         pool = self._pools[key]
         return pool.dispose(v)
+    
+    def dispose_all_of_key(self, key, force=False):
+        """
+        Dispose all values of a given key
+        """
+        if key not in self._pools:
+            return
+        pool = self._pools[key]
+        return pool.dispose_all(force)
     
     def dispose_all(self):
         """

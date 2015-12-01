@@ -72,10 +72,10 @@ class RPCSystem(object):
         self._next_functionid = 0;
         
         self._loop_count = 0
-        self._loop_interval = 300
-        self._loop = task.LoopingCall(self._loop)
+        self._loop_interval = 180
+        self._loopcall = task.LoopingCall(self._loop)
         
-        self._loop.start(self._loop_interval, False)
+        self._loopcall.start(self._loop_interval, False)
         
     @staticmethod
     def listen(my_addr):
@@ -92,7 +92,7 @@ class RPCSystem(object):
         return _rpc_system
     
     def shutdown(self):
-        self._loop.stop()
+        self._loopcall.stop()
         return self.router.shutdown()
         
     def register(self, function):
@@ -281,10 +281,12 @@ class RPCSystem(object):
                 peer_address, callid = pickle.loads(s)
                 if (peer_address, callid) in self._executing_calls:
                     self.router.send(peer_address, 2, blob.StringBlob(str(callid)))
+                else:
+                    self.router.send(peer_address, 3, blob.StringBlob(str(callid)))
             d.addCallback(got_content)
             
         elif frameid == 2:
-            # pong
+            # pong (call found)
             d = blob_.read_all()
             def got_content(s):
                 callid = int(s)
@@ -292,18 +294,32 @@ class RPCSystem(object):
                     self._pending_calls[callid][2] = self._loop_count
             d.addCallback(got_content)
             
-            
+        elif frameid == 3:
+            # pong (call not found)
+            d = blob_.read_all()
+            def got_content(s):
+                callid = int(s)
+                if callid in self._pending_calls:
+                    _, addr, _ = self._pending_calls[callid]
+                    logger.error("Remote %r tells us it does not know call %r." % (addr, callid))
+            d.addCallback(got_content)
         
     def _loop(self):
         self._loop_count += 1
-        deadline = self._loop_count - 3
+        repairline = self._loop_count - 3
+        deadline = self._loop_count - 5
         pending = []
+        repair = []
         dead = []
         for callid, (d, addr, c) in self._pending_calls.iteritems():
             if c <= deadline:
                 dead.append((callid, d, addr))
             else:
                 pending.append((addr,callid))
+                    
+                if c <= repairline:
+                    repair.append(addr)
+            
                 
         for callid, d, addr in dead:
             del self._pending_calls[callid]
@@ -313,6 +329,10 @@ class RPCSystem(object):
                 raise IOError("Pending call appears to be dead. No reaction from %s." % repr(addr))
             except:
                 d.errback()
+                
+        for addr in repair:
+            logger.warn("Attempting to repair connection to %r." % addr)
+            self.router.repair(addr)
                 
         for addr, callid in pending:
             data = pickle.dumps((self.router.my_addr, callid), pickle.HIGHEST_PROTOCOL)

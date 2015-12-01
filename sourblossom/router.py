@@ -36,6 +36,15 @@ class MsgRouter(object):
         yield self._listening_port.stopListening()
         self._pool.dispose_all()
         
+    def repair(self, addr):
+        """
+        Make an attempt to restore the connection to `addr`.
+        """
+        d = self._pool.dispose_all_of_key(addr, force=True)
+        def onerr(reason):
+            logger.error("Error while repairing connection to %r: %r" %(addr, reason.getTraceback()))
+        d.addErrback(onerr)
+        
     @twistit.yieldefer
     def send(self, addr, frameid, blob):
         conn = yield self._pool.acquire(addr)
